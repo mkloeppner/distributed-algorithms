@@ -2,14 +2,13 @@
 plugins {
     id 'java'
     id 'application'
+    id 'org.jetbrains.kotlin.jvm'
 }
 
 group = 'com.example.raft'
 version = '1.0'
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
 }
 
 repositories {
@@ -18,4 +17,10 @@ repositories {
 
 application {
     mainClass = 'com.example.raft.RaftNode'
+}
+dependencies {
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8"
+}
+kotlin {
+    jvmToolchain(21)
 }
