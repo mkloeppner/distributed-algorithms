@@ -9,7 +9,8 @@ public class RpcMessage implements Serializable {
         REQUEST_VOTE,
         VOTE_RESPONSE,
         APPEND_ENTRIES,
-        APPEND_RESPONSE
+        APPEND_RESPONSE,
+        CLIENT_REQUEST
     }
 
     public Type type;

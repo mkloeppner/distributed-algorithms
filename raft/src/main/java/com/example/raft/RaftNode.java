@@ -15,6 +15,7 @@ public class RaftNode {
     private final Map<Integer,Integer> peers;
 
     private volatile State state = State.FOLLOWER;
+    private volatile Integer leaderId = null;
 
     private int currentTerm = 0;
     private Integer votedFor = null;
@@ -27,7 +28,6 @@ public class RaftNode {
     private Map<Integer,Integer> matchIndex = new ConcurrentHashMap<>();
 
     private final WalletStateMachine stateMachine = new WalletStateMachine();
-
     private final ScheduledExecutorService scheduler =
             Executors.newScheduledThreadPool(4);
 
@@ -40,6 +40,7 @@ public class RaftNode {
         this.peers = peers;
         startServer();
         startElectionTimer();
+        startClientLoad();
     }
 
     private void logState(String msg) {
@@ -122,6 +123,7 @@ public class RaftNode {
 
     private void becomeLeader() {
         state = State.LEADER;
+        leaderId = id;
         logState("BECAME LEADER");
         for (var peer : peers.keySet()) {
             nextIndex.put(peer, log.size());
@@ -199,8 +201,10 @@ public class RaftNode {
             lastApplied++;
             LogEntry entry = log.get(lastApplied);
             boolean ok = stateMachine.apply(entry);
-            logState("APPLIED " + entry + " balance=" +
-                    stateMachine.getBalance() + " ok=" + ok);
+            logState("APPLIED index=" + lastApplied +
+                    " entry=" + entry +
+                    " balance=" + stateMachine.getBalance() +
+                    " ok=" + ok);
         }
     }
 
@@ -239,6 +243,7 @@ public class RaftNode {
 
             case APPEND_ENTRIES:
                 lastHeartbeat = System.currentTimeMillis();
+                leaderId = msg.senderId;
                 state = State.FOLLOWER;
 
                 if (msg.prevLogIndex >= 0) {
@@ -270,14 +275,47 @@ public class RaftNode {
                 ok.success = true;
                 ok.term = currentTerm;
                 return ok;
+
+            case CLIENT_REQUEST:
+                if (state == State.LEADER) {
+                    log.add(msg.entries.get(0));
+                }
+                break;
         }
         return null;
     }
 
     public void clientRequest(String op, int amount) {
-        if (state != State.LEADER) return;
-        log.add(new LogEntry(currentTerm, op, amount));
-        logState("CLIENT appended " + op + " " + amount);
+        if (state == State.LEADER) {
+            log.add(new LogEntry(currentTerm, id, op, amount));
+        } else if (leaderId != null) {
+            forwardToLeader(op, amount);
+        }
+    }
+
+    private void forwardToLeader(String op, int amount) {
+        try (Socket socket = new Socket("localhost", peers.get(leaderId))) {
+            RpcMessage msg = new RpcMessage();
+            msg.type = RpcMessage.Type.CLIENT_REQUEST;
+            msg.term = currentTerm;
+            msg.senderId = id;
+            msg.entries = List.of(
+                    new LogEntry(currentTerm, id, op, amount)
+            );
+
+            ObjectOutputStream out =
+                    new ObjectOutputStream(socket.getOutputStream());
+            out.writeObject(msg);
+            out.flush();
+        } catch (Exception ignored) {}
+    }
+
+    private void startClientLoad() {
+        scheduler.scheduleAtFixedRate(() -> {
+            boolean add = random.nextBoolean();
+            int amount = 1 + random.nextInt(100);
+            clientRequest(add ? "ADD" : "CONSUME", amount);
+        }, 5, 2, TimeUnit.SECONDS);
     }
 
     public static void main(String[] args) {
@@ -291,16 +329,6 @@ public class RaftNode {
                       Integer.parseInt(args[i+1]));
         }
 
-        RaftNode node = new RaftNode(id, port, peers);
-
-        Executors.newSingleThreadScheduledExecutor()
-                .scheduleAtFixedRate(() -> {
-                    if (node.state == State.LEADER) {
-                        Random r = new Random();
-                        boolean add = r.nextBoolean();
-                        int amount = 1 + r.nextInt(100);
-                        node.clientRequest(add?"ADD":"CONSUME", amount);
-                    }
-                }, 5, 2, TimeUnit.SECONDS);
+        new RaftNode(id, port, peers);
     }
 }
