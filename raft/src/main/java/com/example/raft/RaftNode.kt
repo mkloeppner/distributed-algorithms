@@ -5,7 +5,6 @@ import java.io.ObjectOutputStream
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.*
-import java.util.List
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
@@ -63,7 +62,7 @@ class RaftNode(private val id: Int, private val port: Int, private val peers: Mu
         Thread(Runnable {
             try {
                 ServerSocket(port).use { server ->
-                    logState("listening on " + port)
+                    logState("listening on $port")
                     while (true) {
                         val socket = server.accept()
                         Thread(Runnable { handle(socket) }).start()
@@ -125,7 +124,7 @@ class RaftNode(private val id: Int, private val port: Int, private val peers: Mu
                 msg.term = currentTerm
                 msg.senderId = id
                 msg.lastLogIndex = log.size - 1
-                msg.lastLogTerm = if (log.isEmpty()) 0 else log.get(log.size - 1).term
+                msg.lastLogTerm = if (log.isEmpty()) 0 else log[log.size - 1].term
 
                 val out = ObjectOutputStream(socket.getOutputStream())
                 out.writeObject(msg)
@@ -145,8 +144,8 @@ class RaftNode(private val id: Int, private val port: Int, private val peers: Mu
         leaderId = id
         logState("BECAME LEADER")
         for (peer in peers.keys) {
-            nextIndex.put(peer, log.size)
-            matchIndex.put(peer, -1)
+            nextIndex[peer] = log.size
+            matchIndex[peer] = -1
         }
         startHeartbeat()
     }
@@ -320,7 +319,7 @@ class RaftNode(private val id: Int, private val port: Int, private val peers: Mu
 
     private fun forwardToLeader(op: String?, amount: Int) {
         try {
-            Socket("localhost", peers.get(leaderId)!!).use { socket ->
+            Socket("localhost", peers[leaderId]!!).use { socket ->
                 val msg = RpcMessage()
                 msg.type = RpcMessage.Type.CLIENT_REQUEST
                 msg.term = currentTerm
@@ -355,10 +354,7 @@ class RaftNode(private val id: Int, private val port: Int, private val peers: Mu
             val peers: MutableMap<Int?, Int> = HashMap<Int?, Int>()
             var i = 2
             while (i < args.size) {
-                peers.put(
-                    args[i].toInt(),
-                    args[i + 1].toInt()
-                )
+                peers[args[i].toInt()] = args[i + 1].toInt()
                 i += 2
             }
 
